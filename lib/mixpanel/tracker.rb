@@ -6,10 +6,25 @@ require 'mixpanel/tracker/middleware'
 
 module Mixpanel
   class Tracker
-    def initialize(token, env, async = false)
+    # Instead of defaulting @async_option to false, it should
+    # default to a module/class that represents sending the
+    # request to mixpanel syncronously.
+    # For backwards compatability, if true passed in, then
+    # @async_option could be the class that wrapped the Worker logic.
+    #
+    # A sample module:
+    # module App::MixpanelAsync
+    #   def self.perform url
+    #     Resque.enqueue(queue, url)
+    #   end
+    #  end
+    #
+    #  mixpanel = Mixpanel::Tracker.new(api_key, request.env, App::MixpanelAsync
+    #
+    def initialize(token, env, async_option = false)
       @token = token
       @env = env
-      @async = async
+      @async_option = async_option
       clear_queue
     end
 
@@ -77,7 +92,7 @@ module Mixpanel
       data = Base64.encode64(JSON.generate(params)).gsub(/\n/,'')
       url = "http://api.mixpanel.com/track/?data=#{data}"
 
-      if(@async)
+      if @async_option == true
         w = Tracker.worker
         begin
           url << "\n"
@@ -85,6 +100,8 @@ module Mixpanel
         rescue Errno::EPIPE => e
           Tracker.dispose_worker(w)
         end
+      elsif @async_option.kind_of?(Module)
+        @async_option.perform(url)
       else
         open(url).read
       end
